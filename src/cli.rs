@@ -88,6 +88,8 @@ pub fn get_cli_args(matches: Option<ArgMatches>) -> OptionArgs {
             .collect::<Vec<PathBuf>>(),
         recursive: get_flag(&arg_matches, "recursive"),
         format_tables: get_flag(&arg_matches, "format-tables"),
+        check_brackets: get_flag(&arg_matches, "check-brackets"),
+        brackets_log: arg_matches.get_one::<PathBuf>("brackets-log").cloned(),
     };
     args
 }

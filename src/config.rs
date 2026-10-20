@@ -170,6 +170,8 @@ pub fn get_config_args(
         format_tables: config
             .get("format-tables")
             .map(|x| x.as_bool().unwrap()),
+        check_brackets: config.get("check-brackets").map(|x| x.as_bool().unwrap()),
+        brackets_log: config.get("brackets-log").and_then(|x| x.as_str()).map(PathBuf::from),
     };
     Some(args)
 }

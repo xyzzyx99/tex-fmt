@@ -6,6 +6,7 @@
 #![warn(clippy::pedantic)]
 
 pub mod args;
+pub mod bracket_check;
 pub mod cli;
 pub mod comments;
 pub mod config;

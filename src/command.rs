@@ -133,6 +133,19 @@ pub fn get_cli_command() -> Command {
                 .help("Recursively search for files to format")
         )
         .arg(
+            Arg::new("check-brackets")
+                .long("check-brackets")
+                .action(SetTrue)
+                .help("Report unmatched or mismatched brackets in LaTeX sources")
+        )
+        .arg(
+            Arg::new("brackets-log")
+                .long("brackets-log")
+                .value_name("PATH")
+                .value_parser(value_parser!(PathBuf))
+                .help("Write bracket diagnostics to PATH (implies --check-brackets)")
+        )
+        .arg(
             Arg::new("format-tables")
                 .long("format-tables")
                 .action(SetTrue)

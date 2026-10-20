@@ -55,6 +55,10 @@ pub struct Args {
     pub recursive: bool,
     /// Enable table formatting
     pub format_tables: bool,
+    /// Enable optional bracket diagnostics
+    pub check_brackets: bool,
+    /// File receiving bracket diagnostics (default: bracket-report.txt)
+    pub brackets_log: Option<PathBuf>,
 }
 
 /// Arguments using Options to track CLI/config file/default values
@@ -101,6 +105,10 @@ pub struct OptionArgs {
     pub recursive: Option<bool>,
     #[merge(strategy= merge::option::overwrite_none)]
     pub format_tables: Option<bool>,
+    #[merge(strategy= merge::option::overwrite_none)]
+    pub check_brackets: Option<bool>,
+    #[merge(strategy= merge::option::overwrite_none)]
+    pub brackets_log: Option<PathBuf>,
 }
 
 fn merge_wrap_chars(left: &mut Vec<char>, right: Vec<char>) {
@@ -169,6 +177,8 @@ impl Default for OptionArgs {
             files: vec![],
             recursive: Some(false),
             format_tables: Some(false),
+            check_brackets: Some(false),
+            brackets_log: None,
         }
     }
 }
@@ -197,6 +207,8 @@ impl OptionArgs {
             files: vec![],
             recursive: None,
             format_tables: None,
+            check_brackets: None,
+            brackets_log: None,
         }
     }
 }
@@ -260,6 +272,8 @@ impl Args {
             files: args.files,
             recursive: args.recursive.unwrap(),
             format_tables: args.format_tables.unwrap(),
+            check_brackets: args.check_brackets.unwrap(),
+            brackets_log: args.brackets_log,
         }
     }
 
@@ -267,6 +281,9 @@ impl Args {
     pub fn resolve(&mut self, logs: &mut Vec<Log>) -> u8 {
         let mut exit_code = 0;
         let empty_path = PathBuf::from("");
+
+        // A requested report path implies bracket checking.
+        self.check_brackets |= self.brackets_log.is_some();
 
         // stdin implies print
         self.print |= self.stdin;
