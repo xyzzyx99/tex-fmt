@@ -329,43 +329,66 @@ const fn indents_return_to_zero(state: &State) -> bool {
     state.indent.actual == 0
 }
 
-/// Run tex-fmt with the provided arguments
+/// Run tex-fmt with the provided arguments.
+/// Bracket diagnostics are read-only: they never invoke the formatter or writer.
 pub fn run(args: &Args, logs: &mut Vec<Log>) -> u8 {
+    if args.check_brackets {
+        let mut exit_code = 0;
+        let mut bracket_report = String::new();
+        if args.stdin {
+            let stdin_path = PathBuf::from("<stdin>");
+            if let Some(text) = read_stdin(logs) {
+                bracket_report.push_str(&format_diagnostics(
+                    &stdin_path,
+                    &check_brackets(&text, &args.verbatims),
+                ));
+            } else {
+                exit_code = 1;
+            }
+        } else {
+            for file in &args.files {
+                if let Some(text) = read(file, logs) {
+                    bracket_report.push_str(&format_diagnostics(
+                        file,
+                        &check_brackets(&text, &args.verbatims),
+                    ));
+                } else {
+                    exit_code = 1;
+                }
+            }
+        }
+
+        if bracket_report.is_empty() {
+            bracket_report.push_str("No bracket issues found.\n");
+        }
+        if let Some(report_path) = &args.brackets_log {
+            if let Err(error) = std::fs::write(report_path, &bracket_report) {
+                eprintln!("Could not write bracket report {}: {error}", report_path.display());
+                exit_code = 1;
+            }
+        } else {
+            print!("{bracket_report}");
+        }
+        return exit_code;
+    }
+
     let mut exit_code = 0;
-    let mut bracket_report = String::new();
     if args.stdin {
         let stdin_path = PathBuf::from("<stdin>");
         if let Some(text) = read_stdin(logs) {
-            if args.check_brackets {
-                bracket_report.push_str(&format_diagnostics(&stdin_path, &check_brackets(&text, &args.verbatims)));
-            }
             let new_text = format_file(&text, &stdin_path, args, logs);
-            exit_code =
-                process_output(args, &stdin_path, &text, &new_text, logs);
+            exit_code = process_output(args, &stdin_path, &text, &new_text, logs);
         } else {
             exit_code = 1;
         }
     } else {
         for file in &args.files {
             if let Some(text) = read(file, logs) {
-                if args.check_brackets {
-                    bracket_report.push_str(&format_diagnostics(file, &check_brackets(&text, &args.verbatims)));
-                }
                 let new_text = format_file(&text, file, args, logs);
                 exit_code |= process_output(args, file, &text, &new_text, logs);
             } else {
                 exit_code = 1;
             }
-        }
-    }
-    if args.check_brackets {
-        let report_path = args.brackets_log.clone().unwrap_or_else(|| PathBuf::from("bracket-report.txt"));
-        let report = if bracket_report.is_empty() { String::from("No bracket issues found.\n") } else { bracket_report };
-        if let Err(error) = std::fs::write(&report_path, &report) {
-            eprintln!("Could not write bracket report {}: {error}", report_path.display());
-            exit_code = 1;
-        } else {
-            eprintln!("Bracket report: {}", report_path.display());
         }
     }
     exit_code

@@ -78,7 +78,7 @@ pub fn check_brackets(source: &str, verbatims: &[String]) -> Vec<Diagnostic> {
 pub fn format_diagnostics(file: &Path, diagnostics: &[Diagnostic]) -> String {
     let mut report = String::new();
     for d in diagnostics {
-        report.push_str(&format!("{}:{}:{}: {}\n", file.display(), d.line, d.column, d.message));
+        report.push_str(&format!("{}: line {}, column {}: {}\n", file.display(), d.line, d.column, d.message));
     }
     report
 }
@@ -104,6 +104,15 @@ mod tests {
     #[test]
     fn skips_verbatim_content() {
         assert!(check_brackets("\\begin{verbatim}\n({[\n\\end{verbatim}", &["verbatim".to_string()]).is_empty());
+    }
+    #[test]
+    fn reports_line_and_column() {
+        let diagnostics = check_brackets("text\n  (\n", &[]);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].line, 2);
+        assert_eq!(diagnostics[0].column, 3);
+        let report = format_diagnostics(Path::new("example.tex"), &diagnostics);
+        assert!(report.contains("example.tex: line 2, column 3:"));
     }
     #[test]
     fn checks_math_brackets() {

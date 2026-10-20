@@ -136,14 +136,14 @@ pub fn get_cli_command() -> Command {
             Arg::new("check-brackets")
                 .long("check-brackets")
                 .action(SetTrue)
-                .help("Report unmatched or mismatched brackets in LaTeX sources")
+                .help("Report unmatched or mismatched brackets without modifying source files")
         )
         .arg(
             Arg::new("brackets-log")
                 .long("brackets-log")
                 .value_name("PATH")
                 .value_parser(value_parser!(PathBuf))
-                .help("Write bracket diagnostics to PATH (implies --check-brackets)")
+                .help("Save diagnostics to PATH instead of printing to console (implies --check-brackets)")
         )
         .arg(
             Arg::new("format-tables")
