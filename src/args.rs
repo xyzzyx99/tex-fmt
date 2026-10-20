@@ -112,6 +112,7 @@ pub struct OptionArgs {
     #[merge(strategy= merge::option::overwrite_none)]
     pub brackets_log: Option<PathBuf>,
     /// HTML bracket report destination; "-" writes to stdout.
+    #[merge(strategy= merge::option::overwrite_none)]
     pub brackets_html: Option<PathBuf>,
 }
 
