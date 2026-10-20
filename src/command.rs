@@ -146,6 +146,15 @@ pub fn get_cli_command() -> Command {
                 .help("Save diagnostics to PATH instead of printing to console (implies --check-brackets)")
         )
         .arg(
+            Arg::new("brackets-html")
+                .long("brackets-html")
+                .value_name("PATH")
+                .num_args(0..=1)
+                .default_missing_value("-")
+                .value_parser(value_parser!(PathBuf))
+                .help("Render a read-only HTML report with line numbers and red bracket highlights; omit PATH for stdout")
+        )
+        .arg(
             Arg::new("format-tables")
                 .long("format-tables")
                 .action(SetTrue)

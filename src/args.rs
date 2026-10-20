@@ -59,6 +59,8 @@ pub struct Args {
     pub check_brackets: bool,
     /// File receiving bracket diagnostics (default: bracket-report.txt)
     pub brackets_log: Option<PathBuf>,
+    /// HTML bracket report destination; "-" writes to stdout.
+    pub brackets_html: Option<PathBuf>,
 }
 
 /// Arguments using Options to track CLI/config file/default values
@@ -109,6 +111,8 @@ pub struct OptionArgs {
     pub check_brackets: Option<bool>,
     #[merge(strategy= merge::option::overwrite_none)]
     pub brackets_log: Option<PathBuf>,
+    /// HTML bracket report destination; "-" writes to stdout.
+    pub brackets_html: Option<PathBuf>,
 }
 
 fn merge_wrap_chars(left: &mut Vec<char>, right: Vec<char>) {
@@ -179,6 +183,7 @@ impl Default for OptionArgs {
             format_tables: Some(false),
             check_brackets: Some(false),
             brackets_log: None,
+            brackets_html: None,
         }
     }
 }
@@ -209,6 +214,7 @@ impl OptionArgs {
             format_tables: None,
             check_brackets: None,
             brackets_log: None,
+            brackets_html: None,
         }
     }
 }
@@ -274,6 +280,7 @@ impl Args {
             format_tables: args.format_tables.unwrap(),
             check_brackets: args.check_brackets.unwrap(),
             brackets_log: args.brackets_log,
+            brackets_html: args.brackets_html,
         }
     }
 
@@ -283,7 +290,7 @@ impl Args {
         let empty_path = PathBuf::from("");
 
         // A requested report path implies bracket checking.
-        self.check_brackets |= self.brackets_log.is_some();
+        self.check_brackets |= self.brackets_log.is_some() || self.brackets_html.is_some();
 
         // stdin implies print
         self.print |= self.stdin;

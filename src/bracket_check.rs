@@ -119,3 +119,73 @@ mod tests {
         assert_eq!(check_brackets("$x=(1$", &[]).len(), 1);
     }
 }
+
+/// Escape source code and tooltips for safe inclusion in an HTML document.
+fn escape_html(text: &str) -> String {
+    let mut escaped = String::new();
+    for c in text.chars() {
+        match c {
+            '&' => escaped.push_str("&amp;"),
+            '<' => escaped.push_str("&lt;"),
+            '>' => escaped.push_str("&gt;"),
+            '"' => escaped.push_str("&quot;"),
+            '\'' => escaped.push_str("&#39;"),
+            _ => escaped.push(c),
+        }
+    }
+    escaped
+}
+
+/// Render a single original source file with every source line numbered.
+/// Offending delimiter characters are red and carry diagnostic tooltips.
+#[must_use]
+pub fn format_html_source(file: &Path, source: &str, diagnostics: &[Diagnostic]) -> String {
+    let mut html = format!("<section><h2>{}</h2><div class=\"source\">\n", escape_html(&file.display().to_string()));
+    // `lines()` preserves interior blank lines; an empty file still gets line 1.
+    let lines: Vec<&str> = if source.is_empty() { vec![""] } else { source.lines().collect() };
+    for (index, line) in lines.iter().enumerate() {
+        let line_number = index + 1;
+        html.push_str(&format!("<div class=\"line\"><span class=\"lineno\">{line_number}</span><span class=\"code\">"));
+        for (offset, c) in line.chars().enumerate() {
+            let column = offset + 1;
+            let issues: Vec<&Diagnostic> = diagnostics.iter().filter(|d| d.line == line_number && d.column == column).collect();
+            if issues.is_empty() {
+                html.push_str(&escape_html(&c.to_string()));
+            } else {
+                let messages = issues.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("; ");
+                html.push_str(&format!("<span class=\"bad\" title=\"{} (line {line_number}, column {column})\">{}</span>", escape_html(&messages), escape_html(&c.to_string())));
+            }
+        }
+        html.push_str("</span></div>\n");
+    }
+    html.push_str("</div></section>\n");
+    html
+}
+
+/// HTML document wrapper. Source files are never modified by this renderer.
+#[must_use]
+pub fn html_start() -> &'static str {
+    "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>tex-fmt bracket report</title><style>body{font-family:system-ui,sans-serif;margin:1.5em}h2{font-size:1em;overflow-wrap:anywhere}.source{font:14px/1.5 Consolas,'Courier New',monospace;overflow-x:auto;border:1px solid #ccc;padding:0.6em 0}.line{display:flex;min-width:max-content;white-space:pre}.lineno{position:sticky;left:0;flex:none;text-align:right;width:5em;padding-right:1em;margin-right:1em;color:#666;background:#fff;border-right:1px solid #ddd;user-select:none}.code{white-space:pre}.bad{color:#c00;background:#ffe3e3;font-weight:bold;text-decoration:underline;text-decoration-color:#c00}</style></head><body><h1>Bracket diagnostics</h1>\n"
+}
+
+/// Close the HTML document.
+#[must_use]
+pub fn html_end() -> &'static str { "</body></html>\n" }
+
+#[cfg(test)]
+mod html_tests {
+    use super::*;
+    #[test]
+    fn includes_all_line_numbers_and_marks_original_character() {
+        let source = "a<(\n\nline 3 ]";
+        let diagnostics = check_brackets(source, &[]);
+        let html = format_html_source(Path::new("a.tex"), source, &diagnostics);
+        assert!(html.contains("&lt;"));
+        assert!(html.contains("class=\"lineno\">1"));
+        assert!(html.contains("class=\"lineno\">2"));
+        assert!(html.contains("class=\"lineno\">3"));
+        assert!(html.contains("line 1, column 3"));
+        assert!(html.contains("line 3, column 8"));
+        assert!(html.contains("class=\"bad\""));
+    }
+}

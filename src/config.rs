@@ -172,6 +172,7 @@ pub fn get_config_args(
             .map(|x| x.as_bool().unwrap()),
         check_brackets: config.get("check-brackets").map(|x| x.as_bool().unwrap()),
         brackets_log: config.get("brackets-log").and_then(|x| x.as_str()).map(PathBuf::from),
+        brackets_html: config.get("brackets-html").and_then(|x| x.as_str()).map(PathBuf::from),
     };
     Some(args)
 }

@@ -1,7 +1,7 @@
 //! Core methodology for formatting a file
 
 use crate::args::{Args, TabChar};
-use crate::bracket_check::{check_brackets, format_diagnostics};
+use crate::bracket_check::{check_brackets, format_diagnostics, format_html_source, html_start, html_end};
 use crate::ignore::{get_ignore, Ignore};
 use crate::indent::{apply_indent, calculate_indent, Indent, MathMode};
 use crate::logging::{record_file_log, Log};
@@ -334,40 +334,48 @@ const fn indents_return_to_zero(state: &State) -> bool {
 pub fn run(args: &Args, logs: &mut Vec<Log>) -> u8 {
     if args.check_brackets {
         let mut exit_code = 0;
-        let mut bracket_report = String::new();
+        let html_mode = args.brackets_html.is_some();
+        let mut report = if html_mode { html_start().to_string() } else { String::new() };
+        let mut add_file = |file: &Path, text: &str| {
+            let diagnostics = check_brackets(text, &args.verbatims);
+            if html_mode {
+                report.push_str(&format_html_source(file, text, &diagnostics));
+            } else {
+                report.push_str(&format_diagnostics(file, &diagnostics));
+            }
+        };
         if args.stdin {
-            let stdin_path = PathBuf::from("<stdin>");
             if let Some(text) = read_stdin(logs) {
-                bracket_report.push_str(&format_diagnostics(
-                    &stdin_path,
-                    &check_brackets(&text, &args.verbatims),
-                ));
+                add_file(Path::new("<stdin>"), &text);
             } else {
                 exit_code = 1;
             }
         } else {
             for file in &args.files {
                 if let Some(text) = read(file, logs) {
-                    bracket_report.push_str(&format_diagnostics(
-                        file,
-                        &check_brackets(&text, &args.verbatims),
-                    ));
+                    add_file(file, &text);
                 } else {
                     exit_code = 1;
                 }
             }
         }
-
-        if bracket_report.is_empty() {
-            bracket_report.push_str("No bracket issues found.\n");
+        if html_mode {
+            report.push_str(html_end());
+        } else if report.is_empty() {
+            report.push_str("No bracket issues found.\n");
         }
-        if let Some(report_path) = &args.brackets_log {
-            if let Err(error) = std::fs::write(report_path, &bracket_report) {
-                eprintln!("Could not write bracket report {}: {error}", report_path.display());
+        let destination = if html_mode {
+            args.brackets_html.as_ref().filter(|p| p.as_os_str() != "-")
+        } else {
+            args.brackets_log.as_ref()
+        };
+        if let Some(path) = destination {
+            if let Err(error) = std::fs::write(path, &report) {
+                eprintln!("Could not write report {}: {error}", path.display());
                 exit_code = 1;
             }
         } else {
-            print!("{bracket_report}");
+            print!("{report}");
         }
         return exit_code;
     }
