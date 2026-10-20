@@ -134,13 +134,37 @@ pub fn check_brackets(source: &str, verbatims: &[String]) -> Vec<Diagnostic> {
     errors
 }
 
-/// Render diagnostics with source filenames and line/column numbers.
+/// Render a compact, aligned diagnostic table for each source file.
 #[must_use]
 pub fn format_diagnostics(file: &Path, diagnostics: &[Diagnostic]) -> String {
-    let mut report = String::new();
-    for d in diagnostics {
-        report.push_str(&format!("{}: line {}, column {}: {}\n", file.display(), d.line, d.column, d.message));
+    if diagnostics.is_empty() {
+        return String::new();
     }
+
+    // The diagnostic text always contains the offending symbol in single quotes.
+    // Retain any additional mismatch explanation in the Description column.
+    let rows: Vec<(usize, usize, String, String)> = diagnostics.iter().map(|d| {
+        let (description, symbol) = if let Some((before, rest)) = d.message.split_once('\'') {
+            if let Some((symbol, after)) = rest.split_once('\'') {
+                (format!("{}{}", before.trim_end(), after), format!("'{}'", symbol))
+            } else {
+                (d.message.clone(), String::new())
+            }
+        } else {
+            (d.message.clone(), String::new())
+        };
+        (d.line, d.column, description, symbol)
+    }).collect();
+
+    let row_width = diagnostics.iter().map(|d| d.line.to_string().len()).max().unwrap_or(0).max(4);
+    let col_width = diagnostics.iter().map(|d| d.column.to_string().len()).max().unwrap_or(0).max(4);
+    let desc_width = rows.iter().map(|r| r.2.chars().count()).max().unwrap_or(0).max("Description".len());
+    let mut report = format!("{}\n", file.display());
+    report.push_str(&format!("{:>row_width$}  {:>col_width$}  {:<desc_width$}  Symbol\n", "Row#", "Col#", "Description"));
+    for (line, column, description, symbol) in rows {
+        report.push_str(&format!("{line:>row_width$}  {column:>col_width$}  {description:<desc_width$}  {symbol}\n"));
+    }
+    report.push('\n');
     report
 }
 
@@ -173,7 +197,11 @@ mod tests {
         assert_eq!(diagnostics[0].line, 2);
         assert_eq!(diagnostics[0].column, 3);
         let report = format_diagnostics(Path::new("example.tex"), &diagnostics);
-        assert!(report.contains("example.tex: line 2, column 3:"));
+        assert!(report.contains("example.tex\n"));
+        assert!(report.contains("Row#  Col#"));
+        assert!(report.contains("2     3"));
+        assert!(report.contains("Unclosed opening"));
+        assert!(report.contains("'('"));
     }
     #[test]
     fn math_brackets_do_not_match_document_brackets() {
