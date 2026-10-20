@@ -2,7 +2,7 @@
 
 use crate::args::{Args, TabChar};
 use crate::ignore::{get_ignore, Ignore};
-use crate::indent::{apply_indent, calculate_indent, Indent};
+use crate::indent::{apply_indent, calculate_indent, Indent, MathMode};
 use crate::logging::{record_file_log, Log};
 use crate::read::{read, read_stdin};
 use crate::regexes::{ENV_BEGIN, ENV_END, ITEM, RE_SPLITTING, VERBS};
@@ -238,6 +238,10 @@ pub struct State {
     pub ignore: Ignore,
     /// Indentation status of the current line
     pub indent: Indent,
+    /// Current inline or display math delimiter across lines
+    pub math_mode: MathMode,
+    /// Current mathematical environment, if any
+    pub math_env: Option<String>,
     /// Verbatim status of the current line
     pub verbatim: Verbatim,
     /// Line number in the new file of the last non-indented line
@@ -257,6 +261,8 @@ impl State {
             linum_new: 1,
             ignore: Ignore::new(),
             indent: Indent::new(),
+            math_mode: MathMode::None,
+            math_env: None,
             verbatim: Verbatim::new(),
             linum_last_zero_indent: 1,
             linum_first_negative_indent: None,

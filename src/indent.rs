@@ -11,9 +11,9 @@ use log::LevelFilter;
 use std::path::Path;
 
 /// Opening delimiters
-const OPENS: [char; 3] = ['{', '(', '['];
+const OPENS: [char; 2] = ['{', '['];
 /// Closing delimiters
-const CLOSES: [char; 3] = ['}', ')', ']'];
+const CLOSES: [char; 2] = ['}', ']'];
 
 /// Information on the indentation state of a line
 #[derive(Debug, Clone)]
@@ -115,16 +115,83 @@ fn get_back(
     back
 }
 
-/// Calculate delimiter-based indent and dedent together for performance
-fn get_diff_back_delim(line: &str) -> (i8, i8) {
+/// Math delimiters are lexical state, not structural indentation delimiters.
+/// Ordinary parentheses never affect indentation: they are TeX text/math characters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MathMode {
+    #[default]
+    None,
+    Dollar,
+    DoubleDollar,
+    Paren,
+    Bracket,
+}
+
+/// Calculate delimiter-based indentation, ignoring math contents, including
+/// math spans extending across lines. Escaped dollars and escaped braces are
+/// handled as literal characters. Environments are tracked separately.
+fn get_diff_back_delim(line: &str, mode: &mut MathMode) -> (i8, i8) {
     let mut diff: i8 = 0;
     let mut back: i8 = 0;
-    for c in line.chars() {
-        diff -= i8::from(OPENS.contains(&c));
-        diff += i8::from(CLOSES.contains(&c));
-        back = max(diff, back);
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Backslash escaping and math delimiters (\(, \), \[ and \]).
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            let next = bytes[i + 1];
+            match (*mode, next) {
+                (MathMode::None, b'(') => *mode = MathMode::Paren,
+                (MathMode::Paren, b')') => *mode = MathMode::None,
+                (MathMode::None, b'[') => *mode = MathMode::Bracket,
+                (MathMode::Bracket, b']') => *mode = MathMode::None,
+                _ => {}
+            }
+            i += 2;
+            continue;
+        }
+        if bytes[i] == b'$' && matches!(*mode, MathMode::None | MathMode::Dollar | MathMode::DoubleDollar) {
+            if *mode == MathMode::DoubleDollar {
+                if bytes.get(i + 1) == Some(&b'$') {
+                    *mode = MathMode::None;
+                    i += 2;
+                    continue;
+                }
+            } else if *mode == MathMode::Dollar {
+                *mode = MathMode::None;
+                i += 1;
+                continue;
+            } else if bytes.get(i + 1) == Some(&b'$') {
+                *mode = MathMode::DoubleDollar;
+                i += 2;
+                continue;
+            } else {
+                *mode = MathMode::Dollar;
+                i += 1;
+                continue;
+            }
+        }
+        if *mode == MathMode::None {
+            let c = line[i..].chars().next().expect("valid UTF-8 character");
+            diff -= i8::from(OPENS.contains(&c));
+            diff += i8::from(CLOSES.contains(&c));
+            back = max(diff, back);
+            i += c.len_utf8();
+        } else {
+            // Math text cannot alter surrounding delimiter indentation.
+            i += line[i..].chars().next().expect("valid UTF-8 character").len_utf8();
+        }
     }
     (-diff, back)
+}
+
+/// Math environments count as environments, but their formula content should
+/// not contribute delimiter indentation.
+fn math_environment(line: &str, prefix: &str) -> Option<&'static str> {
+    const ENVS: [&str; 12] = [
+        "math", "displaymath", "equation", "equation*", "align", "align*",
+        "gather", "gather*", "multline", "multline*", "flalign", "flalign*",
+    ];
+    ENVS.into_iter().find(|env| line.contains(&format!("{prefix}{{{env}}}")))
 }
 
 /// Calculate indentation properties of the current line
@@ -138,6 +205,8 @@ fn get_indent(
     lists_end: &[String],
     no_indent_envs_begin: &[String],
     no_indent_envs_end: &[String],
+    math_mode: &mut MathMode,
+    math_env: &mut Option<String>,
 ) -> Indent {
     let mut diff = get_diff(
         line,
@@ -149,7 +218,20 @@ fn get_indent(
     );
     let mut back =
         get_back(line, pattern, state, lists_end, no_indent_envs_end);
-    let diff_back_delim = get_diff_back_delim(line);
+    // The opening/closing environment still controls indentation normally.
+    let closing_math = math_env.as_ref().is_some_and(|name| line.contains(&format!("\\end{{{name}}}")));
+    let opening_math = math_env.is_none().then(|| math_environment(line, "\\begin")).flatten();
+    let diff_back_delim = if math_env.is_some() || opening_math.is_some() {
+        (0, 0)
+    } else {
+        get_diff_back_delim(line, math_mode)
+    };
+    if closing_math { *math_env = None; }
+    if let Some(name) = opening_math {
+        if !line.contains(&format!("\\end{{{name}}}")) {
+            *math_env = Some(name.to_owned());
+        }
+    }
     diff += diff_back_delim.0;
     back += diff_back_delim.1;
     let actual = prev_indent.actual + diff;
@@ -178,6 +260,8 @@ pub fn calculate_indent(
     // (if there is one) to ignore diffs from characters in there.
     let comment_index = find_comment_index(line, pattern);
     let line_strip = remove_comment(line, comment_index);
+    let mut math_mode = state.math_mode;
+    let mut math_env = state.math_env.clone();
     let mut indent = get_indent(
         line_strip,
         &state.indent,
@@ -187,7 +271,11 @@ pub fn calculate_indent(
         lists_end,
         no_indent_envs_begin,
         no_indent_envs_end,
+        &mut math_mode,
+        &mut math_env,
     );
+    state.math_mode = math_mode;
+    state.math_env = math_env;
 
     // Record the indent to the logs.
     if args.verbosity == LevelFilter::Trace {
@@ -271,4 +359,50 @@ pub fn apply_indent(
     }
     new_line.insert_str(n_indent_chars, trimmed_line);
     new_line
+}
+
+#[cfg(test)]
+mod math_indent_tests {
+    use super::{get_diff_back_delim, MathMode};
+
+    #[test]
+    fn ignores_parentheses_outside_math() {
+        let mut mode = MathMode::None;
+        assert_eq!(get_diff_back_delim("n(H(X_1)", &mut mode), (0, 0));
+    }
+
+    #[test]
+    fn ignores_inline_math_and_resumes_afterwards() {
+        let mut mode = MathMode::None;
+        assert_eq!(get_diff_back_delim("$\\frac{a}{b(c}$", &mut mode), (0, 0));
+        assert_eq!(mode, MathMode::None);
+        assert_eq!(get_diff_back_delim("{text}", &mut mode), (0, 0));
+    }
+
+    #[test]
+    fn multiline_display_math_keeps_indent_clean() {
+        let mut mode = MathMode::None;
+        assert_eq!(get_diff_back_delim("\\[", &mut mode), (0, 0));
+        assert_eq!(mode, MathMode::Bracket);
+        assert_eq!(get_diff_back_delim("\\frac{a}{(b}", &mut mode), (0, 0));
+        assert_eq!(get_diff_back_delim("\\]", &mut mode), (0, 0));
+        assert_eq!(mode, MathMode::None);
+    }
+
+    #[test]
+    fn escaped_dollar_does_not_start_math() {
+        let mut mode = MathMode::None;
+        assert_eq!(get_diff_back_delim(r"\$ {hello", &mut mode), (1, 0));
+        assert_eq!(mode, MathMode::None);
+    }
+
+    #[test]
+    fn double_dollar_multiline() {
+        let mut mode = MathMode::None;
+        assert_eq!(get_diff_back_delim("$$", &mut mode), (0, 0));
+        assert_eq!(mode, MathMode::DoubleDollar);
+        assert_eq!(get_diff_back_delim("[ { (", &mut mode), (0, 0));
+        assert_eq!(get_diff_back_delim("$$", &mut mode), (0, 0));
+        assert_eq!(mode, MathMode::None);
+    }
 }

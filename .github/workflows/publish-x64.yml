@@ -1,0 +1,48 @@
+name: Publish Windows x64
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-win-x64:
+    name: Optimized Windows x64 (AVX2)
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: '3'
+      CARGO_PROFILE_RELEASE_LTO: 'fat'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '1'
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      RUSTFLAGS: '-C target-cpu=x86-64-v3'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --locked --target x86_64-pc-windows-msvc
+      - name: Optimized release build
+        run: cargo build --locked --release --target x86_64-pc-windows-msvc
+      - name: Create portable archive
+        shell: pwsh
+        run: |
+          $exe = 'target/x86_64-pc-windows-msvc/release/tex-fmt.exe'
+          if (-not (Test-Path $exe)) { throw "Missing executable: $exe" }
+          Compress-Archive -Path $exe -DestinationPath tex-fmt-x86_64-windows-avx2.zip -Force
+      - name: Upload downloadable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tex-fmt-windows-x64-avx2
+          path: tex-fmt-x86_64-windows-avx2.zip
+          if-no-files-found: error
+      - name: Attach ZIP to GitHub release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload '${{ github.event.release.tag_name }}' 'tex-fmt-x86_64-windows-avx2.zip' --clobber
