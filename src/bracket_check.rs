@@ -14,12 +14,34 @@ pub struct Diagnostic {
     pub message: String,
 }
 
-/// Report unmatched braces, parentheses and square brackets.
-/// Comments, escaped symbols, and common verbatim environments are skipped.
+/// Independent matching scope. Delimiters never match across math boundaries.
+#[derive(Debug)]
+struct Scope {
+    name: String,
+    opened_at: (usize, usize),
+    brackets: Vec<(char, usize, usize)>,
+}
+
+fn flush_scope(scope: &mut Scope, errors: &mut Vec<Diagnostic>) {
+    for (ch, line, column) in scope.brackets.drain(..) {
+        errors.push(Diagnostic { line, column, message: format!("Unclosed opening '{ch}'") });
+    }
+}
+
+fn is_math_environment(name: &str) -> bool {
+    matches!(name, "math" | "displaymath" | "equation" | "equation*" | "align" | "align*"
+        | "alignat" | "alignat*" | "flalign" | "flalign*" | "gather" | "gather*"
+        | "multline" | "multline*" | "split" | "aligned" | "alignedat" | "gathered"
+        | "cases" | "dcases" | "matrix" | "pmatrix" | "bmatrix" | "Bmatrix"
+        | "vmatrix" | "Vmatrix" | "smallmatrix")
+}
+
+/// Lexically check bracket nesting, with a separate stack for each math block.
+/// This is not a full TeX parser. Math boundaries must be well formed.
 #[must_use]
 pub fn check_brackets(source: &str, verbatims: &[String]) -> Vec<Diagnostic> {
     let mut errors = Vec::new();
-    let mut stack: Vec<(char, usize, usize)> = Vec::new();
+    let mut scopes = vec![Scope { name: String::new(), opened_at: (0, 0), brackets: Vec::new() }];
     let mut verbatim: Option<String> = None;
     for (li, line) in source.lines().enumerate() {
         let number = li + 1;
@@ -41,24 +63,63 @@ pub fn check_brackets(source: &str, verbatims: &[String]) -> Vec<Diagnostic> {
             if c == '%' { break; }
             if c == '\\' {
                 if i + 1 < chars.len() && !chars[i + 1].is_alphabetic() {
-                    // Escaped punctuation (e.g. \%, \{, \}, \[, \]).
+                    let next = chars[i + 1];
+                    let marker = match next { '(' => Some("\\("), ')' => Some("\\("), '[' => Some("\\["), ']' => Some("\\["), _ => None };
+                    if let Some(name) = marker {
+                        if next == '(' || next == '[' {
+                            scopes.push(Scope {name: name.to_string(), opened_at: (number, i + 1), brackets: Vec::new()});
+                        } else if scopes.last().is_some_and(|s| s.name == name) {
+                            let mut scope = scopes.pop().expect("math scope exists");
+                            flush_scope(&mut scope, &mut errors);
+                        }
+                    }
+                    // Escaped punctuation is not a bracket for ordinary matching.
                     i += 2;
                     continue;
                 }
-                // Skip a TeX control word so its name cannot affect parsing.
-                i += 1;
+                let start = i + 1;
+                i = start;
                 while i < chars.len() && (chars[i].is_alphabetic() || chars[i] == '@') { i += 1; }
+                let command: String = chars[start..i].iter().collect();
+                if (command == "begin" || command == "end") && i < chars.len() && chars[i] == '{' {
+                    if let Some(end) = (i+1..chars.len()).find(|&j| chars[j] == '}') {
+                        let name: String = chars[i+1..end].iter().collect();
+                        if is_math_environment(&name) {
+                            let marker = format!("env:{name}");
+                            if command == "begin" {
+                                scopes.push(Scope { name: marker, opened_at: (number, start), brackets: Vec::new() });
+                            } else if scopes.last().is_some_and(|s| s.name == marker) {
+                                let mut scope = scopes.pop().expect("math scope exists");
+                                flush_scope(&mut scope, &mut errors);
+                            }
+                        }
+                        // Environment name braces are TeX syntax, not bracket content.
+                        i = end + 1;
+                    }
+                }
+                continue;
+            }
+            if c == '$' {
+                let double = i + 1 < chars.len() && chars[i + 1] == '$';
+                let name = if double { "$$" } else { "$" };
+                if scopes.last().is_some_and(|s| s.name == name) {
+                    let mut scope = scopes.pop().expect("math scope exists");
+                    flush_scope(&mut scope, &mut errors);
+                } else if scopes.last().is_some_and(|s| s.name.is_empty()) {
+                    scopes.push(Scope {name: name.to_string(), opened_at: (number, i + 1), brackets: Vec::new()});
+                }
+                i += if double { 2 } else { 1 };
                 continue;
             }
             if matches!(c, '{' | '[' | '(') {
-                stack.push((c, number, i + 1));
+                scopes.last_mut().expect("document scope exists").brackets.push((c, number, i + 1));
             } else if matches!(c, '}' | ']' | ')') {
                 let expected = match c { '}' => '{', ']' => '[', ')' => '(', _ => unreachable!() };
+                let stack = &mut scopes.last_mut().expect("document scope exists").brackets;
                 match stack.last().copied() {
                     Some((opener, _, _)) if opener == expected => { stack.pop(); }
                     Some((opener, open_line, open_col)) => {
                         errors.push(Diagnostic {line: number, column: i + 1, message: format!("Mismatched closing '{c}': expected closing for '{opener}' opened at {open_line}:{open_col}")});
-                        // Leave earlier openings available for a later matching close.
                     }
                     None => errors.push(Diagnostic {line: number, column: i + 1, message: format!("Extra closing '{c}'")}),
                 }
@@ -66,8 +127,8 @@ pub fn check_brackets(source: &str, verbatims: &[String]) -> Vec<Diagnostic> {
             i += 1;
         }
     }
-    for (ch, line, column) in stack {
-        errors.push(Diagnostic {line, column, message: format!("Unclosed opening '{ch}'")});
+    for mut scope in scopes {
+        flush_scope(&mut scope, &mut errors);
     }
     errors.sort_by_key(|d| (d.line, d.column));
     errors
@@ -113,6 +174,35 @@ mod tests {
         assert_eq!(diagnostics[0].column, 3);
         let report = format_diagnostics(Path::new("example.tex"), &diagnostics);
         assert!(report.contains("example.tex: line 2, column 3:"));
+    }
+    #[test]
+    fn math_brackets_do_not_match_document_brackets() {
+        let d = check_brackets("\\[\n(x\n\\]\n)\n", &[]);
+        assert_eq!(d.len(), 2);
+        assert_eq!((d[0].line, d[0].column), (2, 1));
+        assert_eq!((d[1].line, d[1].column), (4, 1));
+    }
+    #[test]
+    fn dollar_scopes_are_independent() {
+        let d = check_brackets("$( $ )", &[]);
+        assert_eq!(d.len(), 2);
+    }
+    #[test]
+    fn math_environment_isolated_from_following_text() {
+        let d = check_brackets("\\begin{align}\n(x\n\\end{align}\n)\n", &[]);
+        assert_eq!(d.len(), 2);
+    }
+    #[test]
+    fn nested_math_parentheses_match_inside_one_block() {
+        assert!(check_brackets("\\[ (a[b] + {c}) \\]", &[]).is_empty());
+    }
+    #[test]
+    fn crossed_brackets_in_same_scope_fail() {
+        assert!(!check_brackets("\\[ ([)] \\]", &[]).is_empty());
+    }
+    #[test]
+    fn dollar_escape_does_not_start_math() {
+        assert!(check_brackets(r"\$ (a) \$", &[]).is_empty());
     }
     #[test]
     fn checks_math_brackets() {
