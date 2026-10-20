@@ -336,9 +336,11 @@ pub fn run(args: &Args, logs: &mut Vec<Log>) -> u8 {
         let mut exit_code = 0;
         let html_mode = args.brackets_html.is_some();
         let mut report = if html_mode { html_start().to_string() } else { String::new() };
+        let mut text_report = String::new();
         let mut add_file = |file: &Path, text: &str| {
             let diagnostics = check_brackets(text, &args.verbatims);
             if html_mode {
+                text_report.push_str(&format_diagnostics(file, &diagnostics));
                 report.push_str(&format_html_source(file, text, &diagnostics));
             } else {
                 report.push_str(&format_diagnostics(file, &diagnostics));
@@ -361,6 +363,11 @@ pub fn run(args: &Args, logs: &mut Vec<Log>) -> u8 {
         }
         if html_mode {
             report.push_str(html_end());
+            if text_report.is_empty() {
+                println!("No bracket issues found.");
+            } else {
+                print!("{text_report}");
+            }
         } else if report.is_empty() {
             report.push_str("No bracket issues found.\n");
         }
@@ -374,7 +381,7 @@ pub fn run(args: &Args, logs: &mut Vec<Log>) -> u8 {
                 eprintln!("Could not write report {}: {error}", path.display());
                 exit_code = 1;
             }
-        } else {
+        } else if !html_mode {
             print!("{report}");
         }
         return exit_code;

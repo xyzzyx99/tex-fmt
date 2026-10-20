@@ -145,7 +145,9 @@ pub fn format_html_source(file: &Path, source: &str, diagnostics: &[Diagnostic])
     let lines: Vec<&str> = if source.is_empty() { vec![""] } else { source.lines().collect() };
     for (index, line) in lines.iter().enumerate() {
         let line_number = index + 1;
-        html.push_str(&format!("<div class=\"line\"><span class=\"lineno\">{line_number}</span><span class=\"code\">"));
+        let faulty_line = diagnostics.iter().any(|d| d.line == line_number);
+        let line_class = if faulty_line { "lineno bad-line" } else { "lineno" };
+        html.push_str(&format!("<div class=\"line\"><span class=\"{line_class}\">{line_number}</span><span class=\"code\">"));
         for (offset, c) in line.chars().enumerate() {
             let column = offset + 1;
             let issues: Vec<&Diagnostic> = diagnostics.iter().filter(|d| d.line == line_number && d.column == column).collect();
@@ -165,7 +167,7 @@ pub fn format_html_source(file: &Path, source: &str, diagnostics: &[Diagnostic])
 /// HTML document wrapper. Source files are never modified by this renderer.
 #[must_use]
 pub fn html_start() -> &'static str {
-    "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>tex-fmt bracket report</title><style>body{font-family:system-ui,sans-serif;margin:1.5em}h2{font-size:1em;overflow-wrap:anywhere}.source{font:14px/1.5 Consolas,'Courier New',monospace;overflow-x:auto;border:1px solid #ccc;padding:0.6em 0}.line{display:flex;min-width:max-content;white-space:pre}.lineno{position:sticky;left:0;flex:none;text-align:right;width:5em;padding-right:1em;margin-right:1em;color:#666;background:#fff;border-right:1px solid #ddd;user-select:none}.code{white-space:pre}.bad{color:#c00;background:#ffe3e3;font-weight:bold;text-decoration:underline;text-decoration-color:#c00}</style></head><body><h1>Bracket diagnostics</h1>\n"
+    "<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\"><title>tex-fmt bracket report</title><style>body{font-family:system-ui,sans-serif;margin:1.5em}h2{font-size:1em;overflow-wrap:anywhere}.source{font:14px/1.5 Consolas,'Courier New',monospace;overflow-x:auto;border:1px solid #ccc;padding:0.6em 0}.line{display:flex;min-width:max-content;white-space:pre}.lineno{position:sticky;left:0;flex:none;text-align:right;width:5em;padding-right:1em;margin-right:1em;color:#666;background:#fff;border-right:1px solid #ddd;user-select:none}.code{white-space:pre}.lineno.bad-line{color:#c00;font-weight:bold}.bad{color:#c00;background:#ffe3e3;font-weight:bold;text-decoration:underline;text-decoration-color:#c00}</style></head><body><h1>Bracket diagnostics</h1>\n"
 }
 
 /// Close the HTML document.
@@ -187,5 +189,8 @@ mod html_tests {
         assert!(html.contains("line 1, column 3"));
         assert!(html.contains("line 3, column 8"));
         assert!(html.contains("class=\"bad\""));
+        assert!(html.contains("class=\"lineno bad-line\">1"));
+        assert!(html.contains("class=\"lineno\">2"));
+        assert!(html.contains("class=\"lineno bad-line\">3"));
     }
 }
